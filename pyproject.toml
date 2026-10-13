@@ -1,0 +1,60 @@
+[project]
+name = "pipeline-etl-serverless-aws"
+version = "0.1.0"
+description = "Pipeline ETL serverless na AWS: Lambda, S3, EventBridge, Glue e Athena com Terraform"
+requires-python = ">=3.12"
+dependencies = [
+    # boto3 já vem no runtime Python da Lambda; pyarrow vai numa layer própria.
+    "boto3>=1.35",
+    "pyarrow>=18,<22",
+]
+
+[project.optional-dependencies]
+local = ["duckdb>=1.1"]
+dev = [
+    "duckdb>=1.1",
+    "moto[s3]>=5.0",
+    "sqlglot>=25",
+    "boto3-stubs[s3]>=1.35",
+    "pyarrow-stubs>=17",
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["etl*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106"]
+"etl/local.py" = ["S608"]
+# As URLs vêm da configuração e são sempre https; não há entrada do usuário.
+"etl/http.py" = ["S310"]
+"scripts/*" = ["S101", "S310", "S603"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["duckdb.*", "moto.*", "sqlglot.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["etl"]

@@ -1,0 +1,14 @@
+__pycache__/
+*.egg-info/
+.venv/
+.coverage
+.env
+build/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+infra/moto_override.tf
