@@ -1,0 +1,54 @@
+# Deploy na AWS com credenciais temporárias via OIDC: nenhuma chave fica no GitHub.
+# Só roda depois do bootstrap (infra/bootstrap) e com as variáveis do ambiente "producao":
+#   AWS_ROLE_ARN e TF_STATE_BUCKET (saídas do bootstrap), e opcionalmente EMAIL_ALERTAS.
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["etl/**", "infra/**", "sql/**", "scripts/empacotar.py"]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: producao
+    if: vars.AWS_ROLE_ARN != ''
+    env:
+      TF_VAR_email_alertas: ${{ vars.EMAIL_ALERTAS }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install boto3
+      - name: Empacota função e layer
+        run: python scripts/empacotar.py
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: sa-east-1
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.3"
+          terraform_wrapper: false
+      - name: Terraform plan
+        run: |
+          terraform -chdir=infra init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          terraform -chdir=infra plan -input=false -out=plano
+      - name: Terraform apply
+        run: terraform -chdir=infra apply -input=false plano
+      - name: Teste de fumaça (extração real + consulta no Athena)
+        run: |
+          python scripts/verificar_deploy.py \
+            --funcao "$(terraform -chdir=infra output -raw funcao_extracao)" \
+            --workgroup "$(terraform -chdir=infra output -raw workgroup_athena)" \
+            --banco "$(terraform -chdir=infra output -raw banco_glue)"

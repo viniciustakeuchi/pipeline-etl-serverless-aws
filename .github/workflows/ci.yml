@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  qualidade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check . && ruff format --check .
+      - name: Tipagem
+        run: mypy etl tests scripts
+      - name: Testes (S3 simulado com moto, sem internet)
+        run: pytest --cov=etl --cov-report=term-missing --cov-fail-under=90
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.3"
+      - name: Formatação
+        run: terraform fmt -check -recursive infra
+      - name: Validação
+        run: |
+          for pasta in infra infra/bootstrap; do
+            terraform -chdir=$pasta init -backend=false -input=false
+            terraform -chdir=$pasta validate
+          done
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Empacota função e layer
+        run: |
+          pip install "moto[server]>=5.0"
+          python scripts/empacotar.py
+      - name: Aplica a infraestrutura inteira numa AWS simulada (moto)
+        run: |
+          moto_server -p 5000 --ssl > moto.log 2>&1 &
+          # O provider chama o S3 Control em <conta>.localhost.
+          echo "127.0.0.1 123456789012.localhost" | sudo tee -a /etc/hosts
+          timeout 30 sh -c 'until curl -sk https://localhost:5000/moto-api/ > /dev/null; do sleep 1; done'
+          cp infra/testes/moto_override.tf infra/moto_override.tf
+          terraform -chdir=infra init -input=false -reconfigure
+          terraform -chdir=infra apply -auto-approve -input=false -var email_alertas=ci@exemplo.com
+          terraform -chdir=infra output
+
+  runtime-lambda:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install boto3 pyarrow "moto[server]>=5.0"
+      - name: Empacota para x86_64 (a arquitetura do runner)
+        run: |
+          python scripts/empacotar.py --arquitetura x86_64
+          mkdir -p lambda/task lambda/opt
+          unzip -q build/funcao.zip -d lambda/task
+          unzip -q build/layer-pyarrow.zip -d lambda/opt
+      - name: Sobe S3 simulado e a imagem oficial do runtime python3.12
+        run: |
+          moto_server -H 0.0.0.0 -p 5000 > moto.log 2>&1 &
+          for par in transformacao:9000 extracao:9001; do
+            docker run -d -p "${par#*:}:8080" --add-host host.docker.internal:host-gateway \
+              -e AWS_ACCESS_KEY_ID=teste -e AWS_SECRET_ACCESS_KEY=teste \
+              -e AWS_DEFAULT_REGION=us-east-1 \
+              -e S3_ENDPOINT_URL=http://host.docker.internal:5000 \
+              -e BUCKET_DADOS=pipeline-etl-runtime \
+              -v "$PWD/lambda/task:/var/task:ro" -v "$PWD/lambda/opt:/opt:ro" \
+              public.ecr.aws/lambda/python:3.12 "etl.${par%%:*}.handler"
+          done
+          timeout 30 sh -c 'until curl -s localhost:5000/moto-api/ > /dev/null; do sleep 1; done'
+      - name: Invoca as funções dentro do runtime
+        run: |
+          python scripts/testar_runtime_lambda.py --s3 http://localhost:5000 \
+            --rie http://localhost:9000 --rie-extracao http://localhost:9001
+      - name: Logs dos containers
+        if: failure()
+        run: docker ps -aq | xargs -r -n1 docker logs
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t pipeline-etl .
+      - name: Imagem roda como usuário comum e expõe a linha de comando
+        run: |
+          docker run --rm --entrypoint whoami pipeline-etl | grep -x pipeline
+          docker run --rm pipeline-etl --help

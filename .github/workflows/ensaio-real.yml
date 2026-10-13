@@ -1,0 +1,28 @@
+# Roda o pipeline completo com Docker Compose (S3 local no lugar da AWS) contra as fontes
+# reais do Banco Central e do Tesouro. Serve de canário: se uma fonte mudar de formato,
+# este workflow falha antes de a Lambda de produção falhar.
+name: Ensaio com dados reais
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 12 * * 1" # segundas, 9h em Brasília
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: docker compose up
+        run: |
+          docker compose up --build --abort-on-container-exit --exit-code-from pipeline \
+            2>&1 | tee ensaio.log
+      - name: Resumo
+        if: always()
+        run: |
+          {
+            echo '### Saída do pipeline'
+            echo '```'
+            grep '^pipeline' ensaio.log | sed 's/^pipeline-[0-9]* *| //' | tail -120
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,31 @@
+# Sobe um S3 local (moto server), roda extração + transformação contra as fontes reais e
+# imprime as premissas e a curva do Tesouro calculadas pelo mesmo SQL que roda no Athena.
+services:
+  s3:
+    image: motoserver/moto:5.1.4
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:5000/moto-api/')
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  pipeline:
+    build: .
+    depends_on:
+      s3:
+        condition: service_healthy
+    env_file: .env.example
+    environment:
+      S3_ENDPOINT_URL: http://s3:5000
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        python -m etl.local executar &&
+        python -m etl.local consultar premissas &&
+        python -m etl.local consultar curva_tesouro
