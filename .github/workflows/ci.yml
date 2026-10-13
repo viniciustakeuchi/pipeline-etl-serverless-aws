@@ -85,6 +85,9 @@ jobs:
           done
           timeout 30 sh -c 'until curl -s localhost:5000/moto-api/ > /dev/null; do sleep 1; done'
       - name: Invoca as funções dentro do runtime
+        env:
+          AWS_ACCESS_KEY_ID: teste
+          AWS_SECRET_ACCESS_KEY: teste
         run: |
           python scripts/testar_runtime_lambda.py --s3 http://localhost:5000 \
             --rie http://localhost:9000 --rie-extracao http://localhost:9001
