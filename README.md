@@ -138,6 +138,34 @@ Para o volume deste pipeline (22 execuções por mês, poucos MB de dados):
 Fica abaixo de **US$ 0,10 por mês**. O workgroup do Athena corta qualquer consulta que
 tente ler mais de 100 MB, então um `SELECT *` esquecido não gera surpresa.
 
+## Primeiras execuções reais
+
+O workflow [Ensaio com dados reais](.github/workflows/ensaio-real.yml) rodou o pipeline
+completo duas vezes em 13/10/2026, com as fontes de verdade e um S3 local:
+
+| Fonte | 1ª execução | 2ª execução |
+| --- | --- | --- |
+| `cdi` | 0,8 s, 5 dias | 0,8 s, 5 dias |
+| `selic` | 0,8 s, 6 dias | 0,3 s, 6 dias |
+| `selic_meta` | 0,8 s, 11 dias | 0,8 s, 11 dias |
+| `ipca` | 0,4 s, 13 meses | 3,1 s, 13 meses |
+| `tesouro` | 0,4 s via API, 58 títulos (47 KB) | 39,6 s via CSV, 116 linhas (14,6 MB) |
+
+Na 2ª execução o site do Tesouro respondeu `403` para a API, e a extração caiu sozinha para
+o CSV de dados abertos. A transformação guardou só a janela de 5 dias do CSV (dois dias de
+cotação), e a consulta `curva_tesouro` devolveu os mesmos 58 títulos do último dia. Nas
+duas execuções, nenhum registro foi rejeitado.
+
+A consulta `premissas` devolveu o mesmo resultado nas duas:
+
+```json
+{"cdi_anual": 13.65, "selic_meta": "13.75000000", "ipca_12m": 4.58, "meses_ipca": 12}
+```
+
+São os mesmos valores que o
+[coletor do projeto 2](https://github.com/viniciustakeuchi/coletor-taxas-indicadores) gravou
+no PostgreSQL na mesma data, agora calculados em SQL sobre Parquet.
+
 ## Testes e qualidade
 
 ```bash
@@ -233,7 +261,7 @@ etl/
 infra/                  Terraform: S3, Lambda, Scheduler, Glue, Athena, SQS, SNS, IAM
 infra/bootstrap/        estado remoto e role OIDC do GitHub Actions
 sql/                    consultas salvas no Athena (e testadas no DuckDB)
-scripts/                empacotamento, teste no runtime da Lambda e fumaça do deploy
+scripts/                empacotamento, teste no runtime da Lambda, fumaça do deploy e resumo do ensaio
 ```
 
 ## Licença
