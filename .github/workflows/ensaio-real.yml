@@ -20,9 +20,10 @@ jobs:
       - name: Resumo
         if: always()
         run: |
+          python3 scripts/resumir_ensaio.py ensaio.log | tee resumo.txt
           {
-            echo '### Saída do pipeline'
+            echo '### Ensaio com dados reais'
             echo '```'
-            grep '^pipeline' ensaio.log | sed 's/^pipeline-[0-9]* *| //' | tail -120
+            cat resumo.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
