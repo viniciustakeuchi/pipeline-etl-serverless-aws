@@ -1,0 +1,3 @@
+# Copie para terraform.tfvars e ajuste. Nenhum valor aqui é secreto.
+regiao        = "sa-east-1"
+email_alertas = "seu-email@exemplo.com"
